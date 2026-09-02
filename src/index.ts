@@ -1,105 +1,187 @@
-// provider-allowlist 扩展（入口，TypeScript）
-// 只允许白名单内的模型供应商出现在 pi 中，其余供应商（无论环境变量里有没有 key）一律隐藏。
-//
-// 配置：~/.pi/agent/provider-allowlist.json —— 字符串数组，例如：
-//   ["newai", "deepseek", "opencode-go"]
-// 修改后重启 pi 或 /reload 生效。文件缺失/损坏时不过滤任何供应商（fail-open）并警告。
-//
-// 原理：
-//   1) 启动时枚举 pi 已知供应商（models-store.json + models.json），对不在白名单中的
-//      调用 pi.registerProvider() 覆盖为空模型实现（models: []），使其从 /model 选择器
-//      和 --list-models 中消失。
-//   2) session_start 时用注册表 ctx.modelRegistry.getAvailable() 兜底扫描，隐藏任何漏网
-//      供应商（未来 pi 新增的、或用户新配置 key 的供应商）。
-//   3) /provider-allowlist 命令可查看当前配置与隐藏清单。
-//
-// 已知边界（2026-09 实测）：
-//   - registerProvider 覆盖内置供应商实测有效；pi 文档未明确承诺"覆盖"语义，
-//     若未来版本改变此行为扩展可能失效（工厂阶段每次启动都会重新应用，可自动恢复）。
-//   - pi.unregisterProvider() 实测对内置供应商无效（只对动态注册的供应商生效），故不用。
-//   - 工厂阶段 pi 的模型注册表尚不可用（getModelRegistry 为 undefined），
-//     --list-models 等无会话命令只能靠文件枚举；交互式会话由 session_start 兜底。
-//
-// 本扩展不触碰任何环境变量：工具 api key（EXA/BRAVE 等）与供应商凭证无关，原样保留。
+// provider-allowlist 扩展 — 单模式黑白名单
+// 配置：~/.pi/agent/provider-allowlist.json -> { mode: "allowlist"|"blocklist", providers: string[] }
+// 都不选 = 不落盘，保持默认全部可见
 
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  loadAllowlist,
+  loadFilterConfig,
+  saveFilterConfig,
+  clearFilterConfig,
+  isEmptyConfig,
   enumerateProviders,
   computeHidden,
+  computeVisible,
 } from "./core.js";
+// @ts-ignore filter-ui 为 JS 模块
+import { showFilterWizard } from "./filter-ui.js";
 
 const AGENT_DIR = join(homedir(), CONFIG_DIR_NAME, "agent");
 const CONFIG_PATH = join(AGENT_DIR, "provider-allowlist.json");
 const STORE_PATH = join(AGENT_DIR, "models-store.json");
 const MODELS_PATH = join(AGENT_DIR, "models.json");
 
-// 隐藏后的空实现（models: [] → 目录为空 → 不出现在选择器；baseUrl 不会被真实调用）
 const HIDDEN_PROVIDER = {
   baseUrl: "http://provider-hidden.invalid/v1",
   apiKey: "",
   api: "openai-completions",
-  models: [],
+  models: [] as never[],
 };
 
+let currentConfig: { mode: "allowlist" | "blocklist"; providers: string[] } | null = null;
+
+function allKnownProviders(): Set<string> {
+  const { providers } = enumerateProviders(STORE_PATH, MODELS_PATH);
+  return providers;
+}
+
+function applyFilter(
+  config: { mode: string; providers: string[] } | null,
+  pi: ExtensionAPI,
+  registryProviders?: Set<string>
+) {
+  const providers = registryProviders ?? allKnownProviders();
+  if (!config || isEmptyConfig(config as any)) {
+    for (const p of providers) try { pi.unregisterProvider(p); } catch {}
+    return { hidden: [] as string[], visible: [...providers] };
+  }
+  const hidden = computeHidden(config as any, providers);
+  const visible = computeVisible(config as any, providers);
+  for (const p of hidden) pi.registerProvider(p, HIDDEN_PROVIDER);
+  for (const p of visible) try { pi.unregisterProvider(p); } catch {}
+  return { hidden, visible };
+}
+
+function describeConfig(c: { mode: string; providers: string[] } | null): string {
+  if (!c || isEmptyConfig(c as any)) return "未过滤（全部可见）";
+  const tag = c.mode === "allowlist" ? "白名单" : "黑名单";
+  return `${tag}: ${c.providers.join(", ")}`;
+}
+
 export default function (pi: ExtensionAPI) {
-  const allowlist = loadAllowlist(CONFIG_PATH);
-  if (allowlist === null) {
-    console.warn(
-      `[provider-allowlist] 未找到配置文件 ${CONFIG_PATH}，本次不隐藏任何供应商。` +
-        `创建该文件（JSON 数组，如 ["anthropic", "newai"]）后重启或 /reload 生效。`
-    );
-    return;
+  currentConfig = loadFilterConfig(CONFIG_PATH) as any;
+
+  if (currentConfig) {
+    const { hidden } = applyFilter(currentConfig, pi);
+    if (hidden.length > 0) console.log(`[provider-allowlist] 已隐藏 ${hidden.length} 个: ${hidden.join(", ")} (${describeConfig(currentConfig)})`);
+    else console.log(`[provider-allowlist] 已加载：${describeConfig(currentConfig)}`);
+  } else {
+    console.warn(`[provider-allowlist] 未找到配置 ${CONFIG_PATH}，首次打开将弹出设置向导`);
   }
 
-  const { providers, sawStore } = enumerateProviders(STORE_PATH, MODELS_PATH);
-
-  // 白名单含未知供应商 → 多半是拼写错误（仅在目录缓存可见时提示，避免全新安装误报）
-  if (sawStore) {
-    const unknown = allowlist.filter((p) => !providers.has(p));
-    if (unknown.length > 0) {
-      console.warn(`[provider-allowlist] 白名单包含未知供应商：${unknown.join(", ")}`);
-    }
-  }
-
-  const hidden = computeHidden(allowlist, providers);
-  for (const provider of hidden) {
-    pi.registerProvider(provider, HIDDEN_PROVIDER);
-  }
-  if (hidden.length > 0) {
-    console.log(`[provider-allowlist] 已隐藏 ${hidden.length} 个供应商: ${hidden.join(", ")}`);
-  }
-
-  // 兜底：session 启动时用注册表动态发现并隐藏漏网供应商（/reload 后同样重新应用）
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     try {
-      const seen = new Set();
-      for (const model of ctx.modelRegistry.getAvailable()) {
-        if (!seen.has(model.provider)) {
-          seen.add(model.provider);
-          if (!allowlist.includes(model.provider)) {
-            pi.registerProvider(model.provider, HIDDEN_PROVIDER);
+      if (currentConfig) {
+        const seen = new Set<string>();
+        for (const m of ctx.modelRegistry.getAvailable()) seen.add(m.provider);
+        applyFilter(currentConfig, pi, seen);
+      }
+
+      if (event.reason === "startup" && currentConfig === null && ctx.hasUI && ctx.mode === "tui") {
+        await new Promise((r) => setTimeout(r, 300));
+        const providers = new Set<string>();
+        for (const p of allKnownProviders()) providers.add(p);
+        for (const m of ctx.modelRegistry.getAvailable()) providers.add(m.provider);
+        if (providers.size === 0) {
+          ctx.ui.notify("未发现任何供应商", "warning");
+          return;
+        }
+        ctx.ui.notify("未检测到过滤配置，打开设置向导…", "info");
+        const result = await showFilterWizard(ctx, providers, null);
+        if (result) {
+          if (isEmptyConfig(result as any)) {
+            clearFilterConfig(CONFIG_PATH);
+            currentConfig = null;
+            const reg = new Set<string>();
+            for (const m of ctx.modelRegistry.getAvailable()) reg.add(m.provider);
+            applyFilter(null, pi, reg);
+            ctx.ui.notify("保持默认：未配置过滤，全部供应商可见", "info");
+          } else {
+            saveFilterConfig(CONFIG_PATH, result as any);
+            currentConfig = result as any;
+            const reg = new Set<string>();
+            for (const m of ctx.modelRegistry.getAvailable()) reg.add(m.provider);
+            const { hidden, visible } = applyFilter(currentConfig, pi, reg);
+            ctx.ui.notify(
+              `已保存：${describeConfig(currentConfig)}\n可见: ${visible.join(", ") || "(无)"}\n隐藏: ${hidden.join(", ") || "(无)"}\n提示：内置供应商的“取消隐藏”需 /reload 完全生效`,
+              "info"
+            );
           }
+        } else {
+          ctx.ui.notify("已取消，可随时用 /providers-allowlist 重设", "info");
         }
       }
     } catch (err) {
-      console.error(`[provider-allowlist] session_start 兜底失败：${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[provider-allowlist] session_start 失败：${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
-  // 验证命令：/provider-allowlist 显示当前配置与隐藏的供应商
-  pi.registerCommand("provider-allowlist", {
-    description: "Show allowlist config and hidden providers",
-    handler: async (_args, ctx) => {
-      const all = [...new Set(ctx.modelRegistry.getAvailable().map((m) => m.provider))];
-      const hiddenNow = all.filter((p) => !allowlist.includes(p));
+  async function openWizard(ctx: any) {
+    const providers = new Set<string>();
+    for (const p of allKnownProviders()) providers.add(p);
+    try { for (const m of ctx.modelRegistry.getAvailable()) providers.add(m.provider); } catch {}
+    if (providers.size === 0) {
+      const msg = "未发现任何供应商";
+      if (ctx.hasUI) ctx.ui.notify(msg, "warning"); else console.log(`[provider-allowlist] ${msg}`);
+      return;
+    }
+    const result = await showFilterWizard(ctx, providers, currentConfig as any);
+    if (!result) {
+      if (ctx.hasUI) ctx.ui.notify("已取消", "info");
+      return;
+    }
+    if (isEmptyConfig(result as any)) {
+      clearFilterConfig(CONFIG_PATH);
+      currentConfig = null;
+      const reg = new Set<string>();
+      try { for (const m of ctx.modelRegistry.getAvailable()) reg.add(m.provider); } catch {}
+      const target = reg.size > 0 ? reg : providers;
+      applyFilter(null, pi, target);
+      const msg = `已清除配置，保持默认：全部供应商可见\n文件已删除: ${CONFIG_PATH}`;
+      if (ctx.hasUI) ctx.ui.notify(msg, "info"); else console.log(`[provider-allowlist] ${msg}`);
+      return;
+    }
+    saveFilterConfig(CONFIG_PATH, result as any);
+    currentConfig = result as any;
+    const reg = new Set<string>();
+    try { for (const m of ctx.modelRegistry.getAvailable()) reg.add(m.provider); } catch {}
+    const target = reg.size > 0 ? reg : providers;
+    const { hidden, visible } = applyFilter(currentConfig, pi, target);
+    const msg =
+      `已保存：${describeConfig(currentConfig)}\n` +
+      `可见: ${visible.join(", ") || "(无)"}\n` +
+      `隐藏: ${hidden.join(", ") || "(无)"}\n` +
+      `提示：内置供应商的“取消隐藏”需 /reload 完全生效`;
+    if (ctx.hasUI) ctx.ui.notify(msg, "info"); else console.log(`[provider-allowlist] ${msg}`);
+  }
+
+  const handler = async (args: string, ctx: any) => {
+    const arg = (args || "").trim().toLowerCase();
+    if (arg === "show" || arg === "--show" || arg === "status") {
+      const providers = new Set<string>();
+      try { for (const m of ctx.modelRegistry.getAvailable()) providers.add(m.provider); } catch {}
+      const hidden = currentConfig ? computeHidden(currentConfig as any, providers) : [];
+      const visible = currentConfig ? computeVisible(currentConfig as any, providers) : [...providers];
       const msg =
-        `Allowed: ${allowlist.join(", ") || "(none)"}\n` +
-        `Hidden: ${hiddenNow.join(", ") || "(none)"}`;
+        `配置: ${describeConfig(currentConfig)}\n` +
+        `可见: ${visible.join(", ") || "(无)"}\n` +
+        `隐藏: ${hidden.join(", ") || "(无)"}\n` +
+        `文件: ${CONFIG_PATH}`;
+      if (ctx.hasUI) ctx.ui.notify(msg, "info"); else console.log(`[provider-allowlist] ${msg}`);
+      return;
+    }
+    if (!ctx.hasUI || ctx.mode !== "tui") {
+      const msg = `当前配置: ${describeConfig(currentConfig)}\n请在交互式会话中使用 /providers-allowlist 设置，或直接编辑 ${CONFIG_PATH}`;
+      console.log(`[provider-allowlist] ${msg}`);
       if (ctx.hasUI) ctx.ui.notify(msg, "info");
-      else console.log(`[provider-allowlist] ${msg}`);
-    },
+      return;
+    }
+    await openWizard(ctx);
+  };
+
+  pi.registerCommand("providers-allowlist", {
+    description: "设置供应商黑白名单（单模式，Tab/←→翻页）",
+    handler,
   });
 }

@@ -1,7 +1,22 @@
-// core.js 的类型声明（供 index.ts 类型检查）
-export function loadAllowlist(configPath: string): string[] | null;
+export type FilterMode = "allowlist" | "blocklist";
+export interface FilterConfig {
+  mode: FilterMode;
+  providers: string[];
+}
+
+export function loadFilterConfig(configPath: string): FilterConfig | null;
+export function saveFilterConfig(configPath: string, config: FilterConfig): void;
+export function clearFilterConfig(configPath: string): void;
+export function isEmptyConfig(config: FilterConfig): boolean;
 export function enumerateProviders(
   storePath: string,
   modelsPath: string
 ): { providers: Set<string>; sawStore: boolean };
-export function computeHidden(allowlist: string[], providers: Set<string>): string[];
+export function computeHidden(
+  config: FilterConfig | null | undefined,
+  allProviders: Set<string> | string[]
+): string[];
+export function computeVisible(
+  config: FilterConfig | null | undefined,
+  allProviders: Set<string> | string[]
+): string[];

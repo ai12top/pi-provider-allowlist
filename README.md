@@ -1,76 +1,71 @@
 # pi-provider-allowlist
 
-Restrict [pi](https://pi.dev) to an allowlist of model providers. Providers outside the allowlist are hidden from `/model` and `--list-models` — regardless of which API keys are set in your environment. Tool API keys (search, MCP, misc scripts) are never touched.
+Restrict [pi](https://pi.dev) to a single allowlist or blocklist of model providers. Providers outside the policy are hidden from `/model` and `--list-models` — regardless of which API keys are set in your environment. Tool API keys (search, MCP, misc scripts) are never touched.
 
 ## Install
-
-**主安装方式（推荐，面向已有 pi 的用户）—— 单独安装扩展：**
 
 ```bash
 pi install npm:pi-provider-allowlist
 ```
 
-只安装扩展本身，**不会捆绑安装 pi-coding-agent**（pi 运行时内置提供该依赖，扩展直接使用）。卸载：`pi remove npm:pi-provider-allowlist`。
-
-> 想先试用不安装：`pi -e npm:pi-provider-allowlist`
+Uninstall: `pi remove npm:pi-provider-allowlist`. Trial without install: `pi -e npm:pi-provider-allowlist`.
 
 ## Configure
 
-Create `~/.pi/agent/provider-allowlist.json` — a JSON array of provider names:
+**Interactive (recommended):** run `/providers-allowlist` in pi.
+
+3-page wizard: `1/3 Mode` (allowlist = only keep selected, blocklist = only hide selected) → `2/3 Members` (Space toggle, `a` select all, Tab/←→ switch pages) → `3/3 Submit` (preview visible/hidden, confirm). Empty selection = keep default (all visible, no file created).
+
+**Manual:** create `~/.pi/agent/provider-allowlist.json`:
 
 ```json
-["anthropic", "newai", "opencode-go"]
+{ "mode": "allowlist", "providers": ["anthropic", "newai"] }
+```
+or
+```json
+{ "mode": "blocklist", "providers": ["openai"] }
 ```
 
-Restart pi or run `/reload`. Missing or invalid entries in the whitelist produce a warning; a provider name you never use costs nothing.
+Restart pi or run `/reload` to apply. New pi providers that appear later are filtered automatically on next session.
 
-> **Fail-open by default:** if the config file is missing or broken, **no provider is filtered** and a warning is printed. This prevents a broken config from locking you out of pi entirely. If you rely on this extension for strict enforcement, make sure the file exists before starting pi — or add a check in your shell startup.
+> **Fail-open by default:** if the config file is missing or broken, **no provider is filtered** and a warning is printed. This prevents a broken config from locking you out of pi.
 
-## Verify it works
+## Verify
 
 ```bash
-pi --list-models | awk '{print $1}' | sort -u   # only allowed providers
+pi --list-models | awk '{print $1}' | sort -u   # only visible providers
 ```
 
-In an interactive session, `/provider-allowlist` prints the current config and the hidden providers.
+In an interactive session, `/providers-allowlist show` prints current config.
 
 ## How it works
 
-The extension works at pi's **provider registry level**, not the environment level:
+At pi's **provider registry level**, not env vars:
 
-1. At startup it enumerates known providers from pi's model catalog cache (`~/.pi/agent/models-store.json`) plus custom `models.json`, and overrides every non-allowlisted provider with an empty model list (`pi.registerProvider(name, { models: [] })`), hiding it from `/model` and `--list-models`.
-2. On `session_start` it re-scans via `ctx.modelRegistry.getAvailable()` and hides anything new (future pi providers, newly-authed providers). This also re-applies after `/reload`.
-3. Environment variables are never modified: `EXA_API_KEY`, `BRAVE_API_KEY`, `GITHUB_TOKEN` and everything else pass through untouched for your shell tools.
-
-Keys can come from anywhere (env vars, `auth.json`, `/login`) — the filter only cares about provider *names*.
-
-## Why
-
-If your shell exports `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. that point at a relay or are meant for other tools, pi will offer those providers and fail (or cost money) on real requests. This extension keeps the picker clean and prevents accidental use of providers you didn't intend.
+1. At startup enumerates known providers from `~/.pi/agent/models-store.json` + `models.json`, and overrides hidden providers with empty model list (`pi.registerProvider(name, { models: [] })`).
+2. On `session_start` re-scans via `ctx.modelRegistry.getAvailable()` and re-applies (also after `/reload`).
+3. First startup with no config pops the 3-page wizard (TUI only, `Esc` to cancel).
+4. Env vars (`EXA_API_KEY`, `BRAVE_API_KEY`, etc.) are never modified.
 
 ## Limitations
 
-- **No-session commands** (`--list-models`) rely on reading `models-store.json`; on a fresh install before the catalog is cached, filtering may be incomplete until the store exists. Interactive sessions are always covered by the session-start scan.
-- Provider hiding uses `pi.registerProvider()` override, which is verified to work but is not an explicitly documented "hide provider" API; if a future pi version changes this behavior the extension re-applies on every startup.
-- `pi.unregisterProvider()` only removes dynamically-registered providers and has no effect on built-in ones, so it is not used.
+- `--list-models` without a session relies on `models-store.json` cache; on fresh installs filtering may be incomplete until the store exists.
+- Hiding uses `pi.registerProvider()` override (verified but not documented as "hide"); re-applied each startup.
+- `pi.unregisterProvider()` only affects dynamically-registered providers; restoring built-in providers requires `/reload` (noted in UI).
 
 ## Development
 
 ```bash
-mise run check   # JSON validation, tsc type check, unit tests, npm pack dry-run
-npm pack         # produce the tarball
+mise run check   # tsc + tests + npm pack dry-run
 ```
-
-### Structure
 
 ```
 ├── src/
-│   ├── index.ts     # Extension entry (TypeScript, official manifest pi.extensions)
-│   ├── core.js      # Pure logic (zero deps, unit-tested with explicit path args)
-│   └── core.d.ts    # Types for core.js
-└── test/            # node --test unit tests for src/core.js
+│   ├── index.ts     # Extension entry (pi.extensions)
+│   ├── filter-ui.js # 3-page wizard (pi-tui custom)
+│   ├── core.js      # Pure logic (zero deps, unit-tested)
+│   └── core.d.ts
+└── test/            # node --test
 ```
-
-Entry point follows the official extension pattern: `index.ts` with an explicit `pi.extensions` manifest, loaded by pi via jiti without compilation. Pure logic lives in dependency-free `core.js` so tests run without pi installed. Development/CI uses `npm install` for `devDependencies` (`typescript`, `@earendil-works/pi-coding-agent`); production install (pi install) skips devDependencies, keeping the extension standalone.
 
 MIT licensed.
