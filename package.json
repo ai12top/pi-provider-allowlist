@@ -7,12 +7,12 @@
   "author": "YNanxing",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YNanxing/pi-provider-allowlist.git"
+    "url": "git+https://github.com/ai12top/pi-provider-allowlist.git"
   },
   "bugs": {
-    "url": "https://github.com/YNanxing/pi-provider-allowlist/issues"
+    "url": "https://github.com/ai12top/pi-provider-allowlist/issues"
   },
-  "homepage": "https://github.com/YNanxing/pi-provider-allowlist#readme",
+  "homepage": "https://github.com/ai12top/pi-provider-allowlist#readme",
   "type": "module",
   "pi": {
     "extensions": ["./extensions"]
