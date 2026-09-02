@@ -14,6 +14,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm install --no-audit --no-fund
+      - run: npx tsc --noEmit
       - run: node --test
-      - run: node --check extensions/provider-allowlist.js
       - run: npm pack --dry-run

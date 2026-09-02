@@ -1,4 +1,4 @@
-// provider-allowlist 扩展
+// provider-allowlist 扩展（入口，TypeScript）
 // 只允许白名单内的模型供应商出现在 pi 中，其余供应商（无论环境变量里有没有 key）一律隐藏。
 //
 // 配置：~/.pi/agent/provider-allowlist.json —— 字符串数组，例如：
@@ -6,11 +6,11 @@
 // 修改后重启 pi 或 /reload 生效。文件缺失/损坏时不过滤任何供应商（fail-open）并警告。
 //
 // 原理：
-//   1) 启动时从 pi 的模型目录缓存（models-store.json）与自定义 models.json 枚举全部供应商，
-//      对不在白名单中的调用 pi.registerProvider() 覆盖为空模型实现（models: []），
-//      使其从 /model 选择器和 --list-models 中消失。
-//   2) session_start 时用注册表 ctx.modelRegistry.getAvailable() 兜底扫描，隐藏任何漏网供应商
-//      （未来 pi 新增的、或用户新配置 key 的供应商）。
+//   1) 启动时枚举 pi 已知供应商（models-store.json + models.json），对不在白名单中的
+//      调用 pi.registerProvider() 覆盖为空模型实现（models: []），使其从 /model 选择器
+//      和 --list-models 中消失。
+//   2) session_start 时用注册表 ctx.modelRegistry.getAvailable() 兜底扫描，隐藏任何漏网
+//      供应商（未来 pi 新增的、或用户新配置 key 的供应商）。
 //   3) /provider-allowlist 命令可查看当前配置与隐藏清单。
 //
 // 已知边界（2026-09 实测）：
@@ -22,10 +22,14 @@
 //
 // 本扩展不触碰任何环境变量：工具 api key（EXA/BRAVE 等）与供应商凭证无关，原样保留。
 
-import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  loadAllowlist,
+  enumerateProviders,
+  computeHidden,
+} from "./core.js";
 
 const AGENT_DIR = join(homedir(), CONFIG_DIR_NAME, "agent");
 const CONFIG_PATH = join(AGENT_DIR, "provider-allowlist.json");
@@ -40,66 +44,8 @@ const HIDDEN_PROVIDER = {
   models: [],
 };
 
-// 读取白名单。缺失/损坏 → 返回 null（fail-open：不过滤任何供应商，并警告）。
-export function loadAllowlist() {
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      const parsed = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-      if (Array.isArray(parsed)) return parsed.map(String);
-      console.warn(`[provider-allowlist] 配置格式错误（应为字符串数组）：${CONFIG_PATH}`);
-    }
-  } catch (err) {
-    console.warn(`[provider-allowlist] 配置读取失败：${err.message}`);
-  }
-  return null;
-}
-
-// 枚举 pi 已知供应商：内置目录缓存 + 自定义 models.json。
-// 只认"值为 { models: [...] }"的键，避免未来元数据字段被误判为供应商。
-export function enumerateProviders() {
-  const providers = new Set();
-  let sawStore = false;
-  for (const path of [STORE_PATH, MODELS_PATH]) {
-    try {
-      if (!existsSync(path)) continue;
-      const data = JSON.parse(readFileSync(path, "utf8"));
-      if (!data || typeof data !== "object") continue;
-      // models-store.json 顶层键即供应商名；models.json 则装在顶层 providers 键下
-      const root = path === STORE_PATH ? data : data.providers ?? data;
-      for (const [name, value] of Object.entries(root)) {
-        if (value && Array.isArray(value.models)) providers.add(name);
-      }
-      if (path === STORE_PATH) sawStore = true;
-    } catch (err) {
-      console.warn(`[provider-allowlist] 读取 ${path} 失败：${err.message}`);
-    }
-  }
-  if (!sawStore) {
-    console.warn(
-      `[provider-allowlist] 未找到模型目录缓存 ${STORE_PATH}，` +
-        "--list-models 等无会话命令可能无法过滤；交互式会话由注册表兜底网覆盖。"
-    );
-  }
-  return { providers, sawStore };
-}
-
-// 覆盖隐藏所有不在白名单中的供应商；返回隐藏清单。
-export function hideNonAllowed(pi, allowlist, providers) {
-  const hidden = [];
-  for (const provider of providers) {
-    if (!allowlist.includes(provider)) {
-      pi.registerProvider(provider, HIDDEN_PROVIDER);
-      hidden.push(provider);
-    }
-  }
-  if (hidden.length > 0) {
-    console.log(`[provider-allowlist] 已隐藏 ${hidden.length} 个供应商: ${hidden.join(", ")}`);
-  }
-  return hidden;
-}
-
-export default function (pi) {
-  const allowlist = loadAllowlist();
+export default function (pi: ExtensionAPI) {
+  const allowlist = loadAllowlist(CONFIG_PATH);
   if (allowlist === null) {
     console.warn(
       `[provider-allowlist] 未找到配置文件 ${CONFIG_PATH}，本次不隐藏任何供应商。` +
@@ -108,7 +54,7 @@ export default function (pi) {
     return;
   }
 
-  const { providers, sawStore } = enumerateProviders();
+  const { providers, sawStore } = enumerateProviders(STORE_PATH, MODELS_PATH);
 
   // 白名单含未知供应商 → 多半是拼写错误（仅在目录缓存可见时提示，避免全新安装误报）
   if (sawStore) {
@@ -118,7 +64,13 @@ export default function (pi) {
     }
   }
 
-  hideNonAllowed(pi, allowlist, providers);
+  const hidden = computeHidden(allowlist, providers);
+  for (const provider of hidden) {
+    pi.registerProvider(provider, HIDDEN_PROVIDER);
+  }
+  if (hidden.length > 0) {
+    console.log(`[provider-allowlist] 已隐藏 ${hidden.length} 个供应商: ${hidden.join(", ")}`);
+  }
 
   // 兜底：session 启动时用注册表动态发现并隐藏漏网供应商（/reload 后同样重新应用）
   pi.on("session_start", (_event, ctx) => {
@@ -133,7 +85,7 @@ export default function (pi) {
         }
       }
     } catch (err) {
-      console.error(`[provider-allowlist] session_start 兜底失败：${err.message}`);
+      console.error(`[provider-allowlist] session_start 兜底失败：${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
@@ -142,8 +94,10 @@ export default function (pi) {
     description: "Show allowlist config and hidden providers",
     handler: async (_args, ctx) => {
       const all = [...new Set(ctx.modelRegistry.getAvailable().map((m) => m.provider))];
-      const hidden = all.filter((p) => !allowlist.includes(p));
-      const msg = `Allowed: ${allowlist.join(", ") || "(none)"}\nHidden: ${hidden.join(", ") || "(none)"}`;
+      const hiddenNow = all.filter((p) => !allowlist.includes(p));
+      const msg =
+        `Allowed: ${allowlist.join(", ") || "(none)"}\n` +
+        `Hidden: ${hiddenNow.join(", ") || "(none)"}`;
       if (ctx.hasUI) ctx.ui.notify(msg, "info");
       else console.log(`[provider-allowlist] ${msg}`);
     },

@@ -57,10 +57,20 @@ If your shell exports `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. that point a
 ## Development
 
 ```bash
-mise run check   # JSON validation, syntax check, unit tests, npm pack dry-run
+mise run check   # JSON validation, tsc type check, unit tests, npm pack dry-run
 npm pack         # produce the tarball
 ```
 
-开发/测试环境用 `npm install` 安装 `devDependencies`（含 `@earendil-works/pi-coding-agent`，仅供本地测试解析导入）；生产安装（pi install）会跳过 devDependencies，保持扩展独立。
+### Structure
+
+```
+├── src/
+│   ├── index.ts     # Extension entry (TypeScript, official manifest pi.extensions)
+│   ├── core.js      # Pure logic (zero deps, unit-tested with explicit path args)
+│   └── core.d.ts    # Types for core.js
+└── test/            # node --test unit tests for src/core.js
+```
+
+Entry point follows the official extension pattern: `index.ts` with an explicit `pi.extensions` manifest, loaded by pi via jiti without compilation. Pure logic lives in dependency-free `core.js` so tests run without pi installed. Development/CI uses `npm install` for `devDependencies` (`typescript`, `@earendil-works/pi-coding-agent`); production install (pi install) skips devDependencies, keeping the extension standalone.
 
 MIT licensed.

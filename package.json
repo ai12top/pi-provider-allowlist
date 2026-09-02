@@ -2,7 +2,7 @@
   "name": "pi-provider-allowlist",
   "version": "0.1.0",
   "description": "Restrict pi coding agent to an allowlist of model providers. Providers outside the allowlist are hidden from /model and --list-models, regardless of API keys in the environment. Tool API keys (search, MCP, etc.) are never touched.",
-  "keywords": ["pi-package", "provider", "allowlist", "privacy"],
+  "keywords": ["pi-package", "pi", "extension", "provider", "allowlist", "privacy", "coding-agent"],
   "license": "MIT",
   "author": "ai12top",
   "repository": {
@@ -15,12 +15,13 @@
   "homepage": "https://github.com/ai12top/pi-provider-allowlist#readme",
   "type": "module",
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": ["./src/index.ts"]
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "typescript": "^5.6.0"
   },
-  "files": ["extensions", "README.md", "LICENSE"],
+  "files": ["src", "README.md", "LICENSE"],
   "scripts": {
     "test": "node --test"
   }
