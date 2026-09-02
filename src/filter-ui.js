@@ -21,7 +21,7 @@ export async function showFilterWizard(ctx, providers, initial) {
 
   return ctx.ui.custom((tui, theme, _kb, done) => {
     let page = 0; // 0:模式 1:成员 2:提交
-    let cursors = [mode === "blocklist" ? 1 : 0, 0, 0];
+    let cursors = [initial?.mode === "blocklist" ? 1 : 0, 0, 0];
     let cached;
 
     function refresh() { cached = undefined; tui.requestRender(); }
