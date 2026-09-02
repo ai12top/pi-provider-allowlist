@@ -1,0 +1,27 @@
+{
+  "name": "pi-provider-allowlist",
+  "version": "0.1.0",
+  "description": "Restrict pi coding agent to an allowlist of model providers. Providers outside the allowlist are hidden from /model and --list-models, regardless of API keys in the environment. Tool API keys (search, MCP, etc.) are never touched.",
+  "keywords": ["pi-package", "provider", "allowlist", "privacy"],
+  "license": "MIT",
+  "author": "YNanxing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YNanxing/pi-provider-allowlist.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YNanxing/pi-provider-allowlist/issues"
+  },
+  "homepage": "https://github.com/YNanxing/pi-provider-allowlist#readme",
+  "type": "module",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "files": ["extensions", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test"
+  }
+}
