@@ -10,7 +10,7 @@ echo "== 2. 扩展语法 =="
 node --check extensions/provider-allowlist.js
 echo "OK"
 
-echo "== 3. 依赖安装（peerDependency: @earendil-works/pi-coding-agent）=="
+echo "== 3. 开发依赖安装（devDependency: @earendil-works/pi-coding-agent，仅供本地测试）=="
 if [ ! -d node_modules/@earendil-works/pi-coding-agent ]; then
   npm install --no-audit --no-fund 2>&1 | tail -2
   echo "已安装"

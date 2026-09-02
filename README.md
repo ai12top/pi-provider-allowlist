@@ -4,9 +4,15 @@ Restrict [pi](https://pi.dev) to an allowlist of model providers. Providers outs
 
 ## Install
 
+**主安装方式（推荐，面向已有 pi 的用户）—— 单独安装扩展：**
+
 ```bash
 pi install npm:pi-provider-allowlist
 ```
+
+只安装扩展本身，**不会捆绑安装 pi-coding-agent**（pi 运行时内置提供该依赖，扩展直接使用）。卸载：`pi remove npm:pi-provider-allowlist`。
+
+> 想先试用不安装：`pi -e npm:pi-provider-allowlist`
 
 ## Configure
 
@@ -54,5 +60,7 @@ If your shell exports `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. that point a
 mise run check   # JSON validation, syntax check, unit tests, npm pack dry-run
 npm pack         # produce the tarball
 ```
+
+开发/测试环境用 `npm install` 安装 `devDependencies`（含 `@earendil-works/pi-coding-agent`，仅供本地测试解析导入）；生产安装（pi install）会跳过 devDependencies，保持扩展独立。
 
 MIT licensed.
