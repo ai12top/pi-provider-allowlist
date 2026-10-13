@@ -1,6 +1,6 @@
 {
   "name": "pi-provider-allowlist",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Restrict pi coding agent to a single allowlist or blocklist of model providers. Single mode + 3-page wizard via /providers-allowlist.",
   "keywords": ["pi-package", "pi", "extension", "provider", "allowlist", "privacy", "coding-agent"],
   "license": "MIT",
