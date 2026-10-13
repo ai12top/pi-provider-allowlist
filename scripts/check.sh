@@ -3,8 +3,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== 1. package.json 校验 =="
+echo "== 1. package.json / package-lock.json 校验 =="
 node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('OK')"
+node -e '
+const pkg = require("./package.json"), lock = require("./package-lock.json");
+const a = pkg.version, b = lock.version;
+const c = lock.packages && lock.packages[""] ? lock.packages[""].version : b;
+if (a !== b || a !== c) {
+  console.error("✗ 版本不一致：package.json=" + a + " lock=" + b + " lock.packages[\"\"]=" + c);
+  process.exit(1);
+}
+console.log("版本一致 " + a);
+'
 
 echo "== 2. 开发依赖安装（typescript + @earendil-works/pi-coding-agent，仅供本地检查）=="
 if [ ! -d node_modules/typescript ]; then

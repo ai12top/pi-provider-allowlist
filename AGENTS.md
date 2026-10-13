@@ -12,11 +12,13 @@
 ## 启动
 
 ```bash
-mise run check   # 校验 package.json、扩展语法、npm pack 试打包
+mise run check    # 校验 package.json、扩展语法、npm pack 试打包
+mise run release  # 发版：bump 版本 → 检查 → 提交 → push tag（CI 随后自动 npm publish）
 ```
 
 ## 部署
 
+- **发版：`mise run release patch|minor|major|x.y.z`** —— 推送 `vX.Y.Z` tag 后由 `.github/workflows/release.yml` 自动 `npm publish`（npm OIDC 可信发布，无 token）。流程与一次性配置见 `docs/canon/release-flow.md`
 - 源码发布到 npm（`pi-package` 关键词 → 自动进官方画廊）
 - 本地安装测试：`pi install ./pi-provider-allowlist`（或用 `pi -e` 临时试用）
 - 用户配置：`~/.pi/agent/provider-allowlist.json`（JSON 数组，缺失 = 全部放行并警告）

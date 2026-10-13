@@ -3,6 +3,7 @@
 ## 当前有效文档
 
 - `../README.md`：面向安装者/画廊读者的使用说明（包内自带，随 npm 分发）
+- `canon/release-flow.md`：发版流程（tag 触发 CI 自动 npm publish）与 npm 可信发布配置
 - `research/2026-09-02-opus5-extension-review.md`：claude-opus-5 独立审核报告（含采纳/驳回裁决，见会话记录）
 
 ## 项目定位
